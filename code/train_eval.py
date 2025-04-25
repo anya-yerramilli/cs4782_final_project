@@ -80,7 +80,7 @@ def train(
             n_way=5,
             k_shot=1,
             n_tasks=600,
-            feature_transform="CL2N",  # Center + L2 (paper’s best)
+            feature_transform="CL2N",  # Center + L2 (paper's best)
             device=device,
         )
         print(f"Epoch {epoch:3d} | val 5-way 1-shot acc {val_acc:5.2f}%")
@@ -225,12 +225,12 @@ def main():
     print("got data sets")
 
     # Create data loaders
-    # train_loader = DataLoader(
-    #     train_dataset, batch_size=256, shuffle=True, num_workers=0
-    # )
-    # val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=0)
-    # test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=0)
-    # print("created data loader")
+    train_loader = DataLoader(
+        train_dataset, batch_size=256, shuffle=True, num_workers=0
+    )
+    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=0)
+    print("created data loader")
 
     # Define device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -243,39 +243,39 @@ def main():
     print("init model")
 
     # Train model
-    model = train(model, train_dataset, val_dataset, epochs=90, lr=0.1, device=device)
+    model = train(model, train_loader, val_dataset, epochs=90, lr=0.1, device=device)
     print("done training!")
 
     # Evaluate on test set using 5-way 1-shot and 5-way 5-shot tasks
-    # print("Evaluating on test set...")
+    print("Evaluating on test set...")
 
     # Try different feature transformations
-    # for transform in ["UN", "L2N", "CL2N"]:
-    #     print(f"\nFeature transformation: {transform}")
+    for transform in ["UN", "L2N", "CL2N"]:
+        print(f"\nFeature transformation: {transform}")
 
-    #     # 5-way 1-shot
-    #     one_shot_acc = evaluate_few_shot(
-    #         model,
-    #         test_loader,
-    #         n_way=5,
-    #         k_shot=1,
-    #         n_tasks=10000,
-    #         feature_transform=transform,
-    #         device=device,
-    #     )
-    #     print(f"5-way 1-shot accuracy: {one_shot_acc:.2f}%")
+        # 5-way 1-shot
+        one_shot_acc = evaluate_few_shot(
+            model,
+            test_loader,
+            n_way=5,
+            k_shot=1,
+            n_tasks=10000,
+            feature_transform=transform,
+            device=device,
+        )
+        print(f"5-way 1-shot accuracy: {one_shot_acc:.2f}%")
 
-    #     # 5-way 5-shot
-    #     five_shot_acc = evaluate_few_shot(
-    #         model,
-    #         test_loader,
-    #         n_way=5,
-    #         k_shot=5,
-    #         n_tasks=10000,
-    #         feature_transform=transform,
-    #         device=device,
-    #     )
-    #     print(f"5-way 5-shot accuracy: {five_shot_acc:.2f}%")
+        # 5-way 5-shot
+        five_shot_acc = evaluate_few_shot(
+            model,
+            test_loader,
+            n_way=5,
+            k_shot=5,
+            n_tasks=10000,
+            feature_transform=transform,
+            device=device,
+        )
+        print(f"5-way 5-shot accuracy: {five_shot_acc:.2f}%")
 
 
 if __name__ == "__main__":

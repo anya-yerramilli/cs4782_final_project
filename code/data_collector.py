@@ -11,9 +11,7 @@ def get_datasets(root="../data"):
     data_path = os.path.join(os.path.dirname(__file__), root)
     data_path = os.path.abspath(data_path)
 
-    transform = transforms.Compose(
-        [transforms.Resize(84), transforms.CenterCrop(84), transforms.ToTensor()]
-    )
+    transform = transforms.Compose([transforms.Resize(84), transforms.CenterCrop(84)])
 
     train = l2l.vision.datasets.MiniImagenet(
         root=data_path, mode="train", transform=transform
