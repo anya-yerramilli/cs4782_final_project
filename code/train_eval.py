@@ -109,6 +109,7 @@ def evaluate_few_shot(
     n_tasks=10000,
     feature_transform="CL2N",
     device="cuda",
+    batch_size=32,
 ):
     """
     Evaluate model using few-shot learning with nearest neighbor/centroid
@@ -121,8 +122,17 @@ def evaluate_few_shot(
     all_features = []
     all_labels = []
 
+    # Create a proper DataLoader with batching
+    dataset = data_loader.dataset if hasattr(data_loader, "dataset") else data_loader
+    eval_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,  # Set to 0 for safety, can be increased if needed
+    )
+
     with torch.no_grad():
-        for inputs, labels in tqdm(data_loader, desc="Extracting features"):
+        for inputs, labels in tqdm(eval_loader, desc="Extracting features"):
             inputs = inputs.to(device)
             features = model.feature_extraction(inputs)
             features = torch.flatten(features, start_dim=1)

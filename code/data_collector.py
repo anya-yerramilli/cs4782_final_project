@@ -7,7 +7,7 @@ import os
 # and 20 novel (test) classes.
 
 
-def get_datasets(root="../data"):
+def get_datasets(root="../code/data"):
     data_path = os.path.join(os.path.dirname(__file__), root)
     data_path = os.path.abspath(data_path)
 
