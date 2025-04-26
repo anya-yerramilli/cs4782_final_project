@@ -26,11 +26,11 @@ def train(
 ):
     """
     Supervised pre-training of the SimpleShot backbone on the 64 base classes.
-
-    * Uses SGD with momentum 0.9, weight-decay 5e-4.
-    * LR drops ×0.1 at epochs 45 and 66 (SimpleShot paper schedule).
-    * Early-stops on 5-way / 1-shot validation accuracy (CL2N features).
-    * Restores the best-performing weights at the end.
+    Following the paper's training procedure exactly:
+    - Uses SGD with momentum 0.9, weight-decay 5e-4
+    - LR drops ×0.1 at epochs 45 and 66
+    - No early stopping (train for full 90 epochs)
+    - No dropout or other regularization
     """
 
     criterion = nn.CrossEntropyLoss()
@@ -43,7 +43,6 @@ def train(
     best_state = None
 
     for epoch in range(1, epochs + 1):
-
         # ─────────────────────── training ────────────────────────────
         model.train()
         running_loss = 0.0
@@ -245,15 +244,26 @@ def main():
     # Define device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Initialize model
+    # Initialize model according to paper
     model = SimpleShot(
-        input_dim=84, hidden_dim=64, num_classes=64, l2norm=False, support=None
+        input_dim=84,
+        hidden_dim=64,
+        num_classes=64,  # 64 base classes for training
+        l2norm=False,  # Paper uses CL2N during evaluation, not during training
+        support=None,
     )
     model = model.to(device)
     print("init model")
 
-    # Train model
-    model = train(model, train_loader, val_dataset, epochs=90, lr=0.1, device=device)
+    # Train model following paper's procedure
+    model = train(
+        model,
+        train_loader,
+        val_dataset,
+        epochs=90,  # Paper trains for 90 epochs
+        lr=0.1,  # Initial learning rate
+        device=device,
+    )
     print("done training!")
 
     # Evaluate on test set using 5-way 1-shot and 5-way 5-shot tasks
