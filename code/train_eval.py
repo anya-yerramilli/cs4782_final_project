@@ -75,7 +75,7 @@ def train(
         )
 
         # ─────────────────────── validation episodes ─────────────────
-        val_acc = evaluate_few_shot(
+        val_acc, ci95 = evaluate_few_shot(
             model,
             val_dataset,  # ← dataset, not loader
             n_way=5,
@@ -84,7 +84,7 @@ def train(
             feature_transform="CL2N",  # Center + L2 (paper's best)
             device=device,
         )
-        print(f"Epoch {epoch:3d} | val 5-way 1-shot acc {val_acc:5.2f}%")
+        print(f"Epoch {epoch:3d} | val 5-way 1-shot acc {val_acc:5.2f}% ± {ci95:.2f}%")
 
         # ─────────────────────── checkpoint best ─────────────────────
         if val_acc > best_val_acc:
@@ -216,7 +216,13 @@ def evaluate_few_shot(
         accuracy = 100.0 * (predicted == query_labels).float().mean().item()
         accuracies.append(accuracy)
 
-    return np.mean(accuracies)
+    accuracies = np.array(accuracies)
+    mean = np.mean(accuracies)
+    std = np.std(accuracies, ddof=1)
+    n = len(accuracies)
+    ci95 = 1.96 * (std / np.sqrt(n))
+
+    return mean, ci95
 
 
 def main():
@@ -256,7 +262,7 @@ def main():
         print(f"\nFeature transformation: {transform}")
 
         # 5-way 1-shot
-        one_shot_acc = evaluate_few_shot(
+        one_shot_acc, ci95 = evaluate_few_shot(
             model,
             test_loader,
             n_way=5,
@@ -265,10 +271,10 @@ def main():
             feature_transform=transform,
             device=device,
         )
-        print(f"5-way 1-shot accuracy: {one_shot_acc:.2f}%")
+        print(f"5-way 1-shot accuracy: {one_shot_acc:.2f}% ± {ci95:.2f}%")
 
         # 5-way 5-shot
-        five_shot_acc = evaluate_few_shot(
+        five_shot_acc, ci95 = evaluate_few_shot(
             model,
             test_loader,
             n_way=5,
@@ -277,7 +283,7 @@ def main():
             feature_transform=transform,
             device=device,
         )
-        print(f"5-way 5-shot accuracy: {five_shot_acc:.2f}%")
+        print(f"5-way 5-shot accuracy: {five_shot_acc:.2f}% ± {ci95:.2f}%")
 
 
 if __name__ == "__main__":
