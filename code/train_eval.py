@@ -14,6 +14,7 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
 import torch
+from argparse import ArgumentParser
 
 
 def train(
@@ -124,10 +125,9 @@ def evaluate_few_shot(
     with torch.no_grad():
         for inputs, labels in tqdm(data_loader, desc="Extracting features"):
             inputs = inputs.to(device)
-            features = model.feature_extraction(inputs)
-            features = torch.flatten(features, start_dim=1)
+            features = model.feature_extraction(inputs.unsqueeze(0))
             all_features.append(features.cpu())
-            all_labels.append(labels)
+            all_labels.append(labels.view(-1) if torch.is_tensor(labels) else torch.tensor([labels]))
 
     all_features = torch.cat(all_features, dim=0)
     all_labels = torch.cat(all_labels, dim=0)
@@ -236,9 +236,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize model
-    model = SimpleShot(
-        input_dim=84, hidden_dim=64, num_classes=64, l2norm=False, support=None
-    )
+    parser = ArgumentParser()
+    parser.add_argument("--network", type=str, default="Conv-4")
+    args = parser.parse_args()  
+
+    model = SimpleShot(input_dim=84, num_classes=64, network=args.network)
     model = model.to(device)
     print("init model")
 
