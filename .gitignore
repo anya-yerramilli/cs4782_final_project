@@ -1,1 +1,6 @@
 code/__pycache__
+
+# ignore everything in data exception .md and .png files
+data/*
+!data/*.md
+!data/*.png
