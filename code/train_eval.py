@@ -16,286 +16,131 @@ import torch.optim as optim
 import torch
 
 
-def train(
-    model,
-    train_loader,
-    val_dataset,  # NOTE: pass the *dataset*, not the loader
-    epochs: int = 90,
-    lr: float = 0.1,
-    device: str = "cuda",
-):
-    """
-    Supervised pre-training of the SimpleShot backbone on the 64 base classes.
-    Following the paper's training procedure exactly:
-    - Uses SGD with momentum 0.9, weight-decay 5e-4
-    - LR drops ×0.1 at epochs 45 and 66
-    - No early stopping (train for full 90 epochs)
-    - No dropout or other regularization
-    """
+def train(model, train_ds, val_ds, device="cuda"):
+    loader = DataLoader(train_ds, batch_size=256, shuffle=True, num_workers=0)
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[45, 66], gamma=0.1
-    )
+    crit = nn.CrossEntropyLoss()
+    opt = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    sched = optim.lr_scheduler.MultiStepLR(opt, milestones=[45, 66], gamma=0.1)
 
-    best_val_acc = 0.0
-    best_state = None
+    best_acc, best_state = 0.0, None
 
-    for epoch in range(1, epochs + 1):
-        # ─────────────────────── training ────────────────────────────
+    for epoch in range(1, 91):
+        # ---- supervised CE on 64 base classes ----
         model.train()
-        running_loss = 0.0
-        running_hits = 0
-        running_total = 0
-
-        for inputs, targets in tqdm(
-            train_loader, desc=f"Epoch {epoch:3d}/{epochs} – train", leave=False
-        ):
-            inputs, targets = inputs.to(device), targets.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+        hits, n, loss_sum = 0, 0, 0.0
+        for x, y in tqdm(loader, leave=False, desc=f"Epoch {epoch:3d} train"):
+            x, y = x.to(device), y.to(device)
+            opt.zero_grad()
+            logits = model(x)
+            loss = crit(logits, y)
             loss.backward()
-            optimizer.step()
+            opt.step()
 
-            running_loss += loss.item()
-            _, preds = outputs.max(1)
-            running_total += targets.size(0)
-            running_hits += preds.eq(targets).sum().item()
+            loss_sum += loss.item()
+            hits += logits.argmax(1).eq(y).sum().item()
+            n += y.size(0)
 
-        train_loss = running_loss / len(train_loader)
-        train_acc = 100.0 * running_hits / running_total
         print(
-            f"Epoch {epoch:3d} | train loss {train_loss:.3f} | "
-            f"train acc {train_acc:5.2f}%"
+            f"Epoch {epoch:3d} | train loss {loss_sum/len(loader):.3f} "
+            f"| train acc {100*hits/n:5.2f}%"
         )
 
-        # ─────────────────────── validation episodes ─────────────────
-        val_acc = evaluate_few_shot(
-            model,
-            val_dataset,  # ← dataset, not loader
-            n_way=5,
-            k_shot=1,
-            n_tasks=600,
-            feature_transform="CL2N",  # Center + L2 (paper's best)
-            device=device,
-        )
-        print(f"Epoch {epoch:3d} | val 5-way 1-shot acc {val_acc:5.2f}%")
+        # ---- few-shot validation every 5 epochs ----
+        if epoch % 5 == 0 or epoch == 90:
+            val_acc = evaluate_few_shot(
+                model, val_ds, device=device, n_way=5, k_shot=1, n_tasks=600
+            )
+            print(f"Epoch {epoch:3d} | val 5-way/1-shot {val_acc:5.2f}%")
+            if val_acc > best_acc:
+                best_acc, best_state = val_acc, copy.deepcopy(model.state_dict())
 
-        # ─────────────────────── checkpoint best ─────────────────────
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_state = copy.deepcopy(model.state_dict())
-            print(f"  🏆  new best model ({best_val_acc:5.2f}%) saved")
+        sched.step()
 
-        scheduler.step()
-
-    # ─────────────────── restore best weights ────────────────────────
-    if best_state is not None:
-        model.load_state_dict(best_state)
-        print(f"\nLoaded best model with val acc {best_val_acc:5.2f}%")
+    # restore best / compute global mean --------------------------------------
+    model.load_state_dict(best_state)
+    base_loader = DataLoader(train_ds, batch_size=256, shuffle=False)
+    with torch.no_grad():
+        feats = [
+            model.feature_extraction(x.to(device)).view(x.size(0), -1).cpu()
+            for x, _ in base_loader
+        ]
+    model.support_mean = torch.cat(feats).mean(0, keepdim=True)
+    print(f"\nBest val acc {best_acc:5.2f}% – support_mean stored.")
 
     return model
 
 
-def evaluate_few_shot(
-    model,
-    data_loader,
-    n_way=5,
-    k_shot=1,
-    n_tasks=10000,
-    feature_transform="CL2N",
-    device="cuda",
-    batch_size=32,
-):
+def evaluate_few_shot(model, dataset, n_way=5, k_shot=1, n_tasks=600, device="cuda"):
     """
-    Evaluate model using few-shot learning with nearest neighbor/centroid
-    feature_transform: 'UN' (unnormalized), 'L2N' (L2-normalized), 'CL2N' (centered L2-normalized)
+    CL2N + nearest-centroid evaluation.
     """
     model.eval()
-    accuracies = []
+    feats, labels = [], []
 
-    # Get all features and labels from the dataset
-    all_features = []
-    all_labels = []
-
-    # Create a proper DataLoader with batching
-    dataset = data_loader.dataset if hasattr(data_loader, "dataset") else data_loader
-    eval_loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,  # Set to 0 for safety, can be increased if needed
-    )
-
+    loader = DataLoader(dataset, batch_size=256, shuffle=False, num_workers=0)
     with torch.no_grad():
-        for inputs, labels in tqdm(eval_loader, desc="Extracting features"):
-            inputs = inputs.to(device)
-            features = model.feature_extraction(inputs)
-            features = torch.flatten(features, start_dim=1)
-            all_features.append(features.cpu())
-            all_labels.append(labels)
+        for x, y in loader:
+            x = x.to(device)
+            f = model.feature_extraction(x).view(x.size(0), -1)
+            feats.append(f.cpu())
+            labels.append(y)
+    feats = torch.cat(feats)
+    labels = torch.cat(labels)
+    classes = labels.unique().tolist()
 
-    all_features = torch.cat(all_features, dim=0)
-    all_labels = torch.cat(all_labels, dim=0)
+    # ---------- pre-centred / L2-normed features ----------
+    if not hasattr(model, "support_mean") or model.support_mean is None:
+        raise RuntimeError("model.support_mean is not set – run training first.")
+    feats = feats - model.support_mean  # centre
+    feats = feats / (feats.norm(dim=1, keepdim=True) + 1e-8)  # L2
 
-    # Compute support mean for centering if using CL2N
-    if feature_transform == "CL2N":
-        support_mean = torch.mean(all_features, dim=0, keepdim=True)
-    else:
-        support_mean = None
+    accs = []
+    rng = torch.Generator().manual_seed(42)
+    for _ in tqdm(range(n_tasks), leave=False):
+        sampled = random.sample(classes, n_way)
 
-    # Sample n_tasks tasks
-    classes = torch.unique(all_labels).tolist()
+        sup_f, sup_l, qry_f, qry_l = [], [], [], []
+        for new_lbl, c in enumerate(sampled):
+            idx = (labels == c).nonzero(as_tuple=False).squeeze()
+            perm = idx[torch.randperm(idx.numel(), generator=rng)]
+            sup_idx, qry_idx = perm[:k_shot], perm[k_shot : k_shot + 15]
 
-    for _ in tqdm(range(n_tasks), desc=f"Evaluating {n_way}-way {k_shot}-shot"):
-        # Sample n_way classes
-        sampled_classes = random.sample(classes, n_way)
+            sup_f.append(feats[sup_idx])
+            sup_l += [new_lbl] * k_shot
+            qry_f.append(feats[qry_idx])
+            qry_l += [new_lbl] * qry_idx.numel()
 
-        # For each sampled class, select k_shot examples as support and 15 examples as query
-        support_features = []
-        support_labels = []
-        query_features = []
-        query_labels = []
+        sup_f = torch.cat(sup_f)
+        qry_f = torch.cat(qry_f)
+        sup_l = torch.tensor(sup_l)
+        qry_l = torch.tensor(qry_l)
 
-        for i, cls in enumerate(sampled_classes):
-            # Get indices of all examples of this class
-            cls_indices = torch.nonzero(all_labels == cls).squeeze()
-            # Sample k_shot + 15 examples (or all available if less)
-            num_examples = min(cls_indices.size(0), k_shot + 15)
-            selected_indices = cls_indices[
-                torch.randperm(cls_indices.size(0))[:num_examples]
-            ]
+        # centroids
+        centroids = torch.stack([sup_f[sup_l == i].mean(0) for i in range(n_way)])
+        dists = ((qry_f[:, None, :] - centroids[None]) ** 2).sum(-1)  # (q, n_way)
+        pred = dists.argmin(1)
+        accs.append((pred == qry_l).float().mean().item() * 100)
 
-            # First k_shot examples go to support set
-            support_idx = selected_indices[:k_shot]
-            support_feat = all_features[support_idx]
-            support_features.append(support_feat)
-            support_labels.extend(
-                [i] * support_idx.size(0)
-            )  # Use 0 to n_way-1 as labels
-
-            # Remaining examples go to query set (up to 15)
-            query_idx = selected_indices[k_shot : k_shot + 15]
-            query_feat = all_features[query_idx]
-            query_features.append(query_feat)
-            query_labels.extend([i] * query_idx.size(0))  # Use 0 to n_way-1 as labels
-
-        support_features = torch.cat(support_features, dim=0)
-        support_labels = torch.tensor(support_labels)
-        query_features = torch.cat(query_features, dim=0)
-        query_labels = torch.tensor(query_labels)
-
-        # Apply feature transformation
-        if feature_transform == "L2N" or feature_transform == "CL2N":
-            if feature_transform == "CL2N" and support_mean is not None:
-                # Center features
-                support_features = support_features - support_mean
-                query_features = query_features - support_mean
-
-            # L2-normalize features
-            support_features = support_features / (
-                torch.norm(support_features, dim=1, keepdim=True) + 1e-8
-            )
-            query_features = query_features / (
-                torch.norm(query_features, dim=1, keepdim=True) + 1e-8
-            )
-
-        # Compute class centroids for support features (for multi-shot scenario)
-        centroids = []
-        for i in range(n_way):
-            mask = support_labels == i
-            class_features = support_features[mask]
-            centroid = torch.mean(class_features, dim=0)
-            centroids.append(centroid)
-        centroids = torch.stack(centroids)
-
-        # Compute distances and get predictions
-        num_queries = query_features.size(0)
-        num_centroids = centroids.size(0)
-        distances = torch.zeros(num_queries, num_centroids)
-
-        for i in range(num_queries):
-            for j in range(num_centroids):
-                distances[i, j] = torch.sum((query_features[i] - centroids[j]) ** 2)
-
-        _, predicted = torch.min(distances, dim=1)
-        accuracy = 100.0 * (predicted == query_labels).float().mean().item()
-        accuracies.append(accuracy)
-
-    return np.mean(accuracies)
+    return float(np.mean(accs))
 
 
 def main():
-    # Get datasets
-    train_dataset, val_dataset, test_dataset = get_datasets()
-    print("got data sets")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    train_ds, val_ds, test_ds = get_datasets()
 
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset, batch_size=256, shuffle=True, num_workers=0
+    model = SimpleShot(input_dim=84, hidden_dim=64, num_classes=64, l2norm=True).to(
+        device
     )
-    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=0)
-    print("created data loader")
 
-    # Define device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = train(model, train_ds, val_ds, device=device)
 
-    # Initialize model according to paper
-    model = SimpleShot(
-        input_dim=84,
-        hidden_dim=64,
-        num_classes=64,  # 64 base classes for training
-        l2norm=False,  # Paper uses CL2N during evaluation, not during training
-        support=None,
-    )
-    model = model.to(device)
-    print("init model")
-
-    # Train model following paper's procedure
-    model = train(
-        model,
-        train_loader,
-        val_dataset,
-        epochs=90,  # Paper trains for 90 epochs
-        lr=0.1,  # Initial learning rate
-        device=device,
-    )
-    print("done training!")
-
-    # Evaluate on test set using 5-way 1-shot and 5-way 5-shot tasks
-    print("Evaluating on test set...")
-
-    # Try different feature transformations
-    for transform in ["UN", "L2N", "CL2N"]:
-        print(f"\nFeature transformation: {transform}")
-
-        # 5-way 1-shot
-        one_shot_acc = evaluate_few_shot(
-            model,
-            test_loader,
-            n_way=5,
-            k_shot=1,
-            n_tasks=10000,
-            feature_transform=transform,
-            device=device,
+    # ------------------- final test scores -------------------
+    for shots in (1, 5):
+        acc = evaluate_few_shot(
+            model, test_ds, n_way=5, k_shot=shots, n_tasks=10000, device=device
         )
-        print(f"5-way 1-shot accuracy: {one_shot_acc:.2f}%")
-
-        # 5-way 5-shot
-        five_shot_acc = evaluate_few_shot(
-            model,
-            test_loader,
-            n_way=5,
-            k_shot=5,
-            n_tasks=10000,
-            feature_transform=transform,
-            device=device,
-        )
-        print(f"5-way 5-shot accuracy: {five_shot_acc:.2f}%")
+        print(f"TEST 5-way {shots}-shot  :  {acc:5.2f}%")
 
 
 if __name__ == "__main__":
