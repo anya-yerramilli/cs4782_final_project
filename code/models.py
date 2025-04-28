@@ -47,48 +47,30 @@ class SimpleShot(nn.Module):
     x = self.fc(x)
     return x
   
-  # @torch.no_grad()
-  # def nearest_neighbor_classification(self, query_images, support_images, support_labels):
-  #   # extract features fθ(I)
-  #   query_features = self.feature_extraction(query_images)
-  #   query_features = torch.flatten(query_features, start_dim=1)
-    
-  #   support_features = self.feature_extraction(support_images)
-  #   support_features = torch.flatten(support_features, start_dim=1)
+  @torch.no_grad()
+  def nearest_neighbor_classification(self, query_features, support_features, support_labels):
+    # feature transformations (centering and l2) should be done outside if needed
 
-  #   # feature transformations (centering and l2)
-  #   if self.support is not None:
-  #     support_mean = torch.mean(self.feature_extraction(self.support), dim=0)
-  #     support_mean = torch.flatten(support_mean)
-  #     query_features = query_features - support_mean
-  #     support_features = support_features - support_mean
+    # nearest centroid approach (averaged feature vector for each class in support)
+    support_classes = torch.unique(support_labels)
+    class_centroids = []
+    for c in support_classes:
+        mask = (support_labels == c)
+        class_features = support_features[mask]
+        centroid = torch.mean(class_features, dim=0)
+        class_centroids.append(centroid)
 
-  #   if self.l2norm:
-  #     query_features = query_features / (1e-8 + torch.linalg.vector_norm(query_features, ord=2, dim=-1, keepdim = True))
-  #     support_features = support_features / (1e-8 + torch.linalg.vector_norm(support_features, ord=2, dim=-1, keepdim=True))
+    # stack centroids --> single tensor
+    centroids = torch.stack(class_centroids)
 
-  #   # nearest centroid approach (averaged feature vector for each class in support)
-  #   support_classes = torch.unique(support_labels)
-  #   class_centroids = []
-  #   for c in support_classes:
-  #     mask = (support_labels == c)
-  #     class_features = support_features[mask]
-  #     # averaged feature vector
-  #     centroid = torch.mean(class_features, dim=0)
-  #     class_centroids.append(centroid)
+    number_queries = query_features.size(0)
+    number_centroids = centroids.size(0)
+    distances = torch.zeros(number_queries, number_centroids, device=query_features.device)
 
-  #   # stack centroids --> single tensor
-  #   centroids = torch.stack(class_centroids)
+    for i in range(number_queries):
+        for j in range(number_centroids):
+            distances[i, j] = torch.sum((query_features[i] - centroids[j]) ** 2)
 
-  #   number_queries = query_features.size(0)
-  #   number_centroids = centroids.size(0)
-  #   distances = torch.zeros(number_queries, number_centroids)
+    _, nearest_centroid = torch.min(distances, dim=1)
 
-  #   for i in range(number_queries):
-  #     for j in range(number_centroids):
-  #       distances[i, j] = torch.sum((query_features[i]-centroids[j])**2)
-
-  #   _, nearest_centroid = torch.min(distances, dim=1)
-  #   predictions = support_classes[nearest_centroid]
-
-  #   return predictions
+    return nearest_centroid
