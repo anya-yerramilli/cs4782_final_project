@@ -8,7 +8,6 @@ import random
 from models import SimpleShot
 from data_collector import get_datasets
 
-
 import copy
 from tqdm import tqdm
 import torch.nn as nn
@@ -194,25 +193,8 @@ def evaluate_few_shot(
                 torch.norm(query_features, dim=1, keepdim=True) + 1e-8
             )
 
-        # Compute class centroids for support features (for multi-shot scenario)
-        centroids = []
-        for i in range(n_way):
-            mask = support_labels == i
-            class_features = support_features[mask]
-            centroid = torch.mean(class_features, dim=0)
-            centroids.append(centroid)
-        centroids = torch.stack(centroids)
-
-        # Compute distances and get predictions
-        num_queries = query_features.size(0)
-        num_centroids = centroids.size(0)
-        distances = torch.zeros(num_queries, num_centroids)
-
-        for i in range(num_queries):
-            for j in range(num_centroids):
-                distances[i, j] = torch.sum((query_features[i] - centroids[j]) ** 2)
-
-        _, predicted = torch.min(distances, dim=1)
+        predicted = model.nearest_neighbor_classification(query_features, support_features, support_labels)
+        
         accuracy = 100.0 * (predicted == query_labels).float().mean().item()
         accuracies.append(accuracy)
 
