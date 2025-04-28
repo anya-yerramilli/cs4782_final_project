@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from networks import Conv4, ResNet18
+from networks import Conv4, ResNet10, ResNet18
 
 class SimpleShot(nn.Module):
   def __init__(
@@ -22,8 +22,12 @@ class SimpleShot(nn.Module):
     # convolutional network
     if network == "Conv-4":
       self.conv_net = Conv4()
-    else:
+    elif network == "ResNet-10":
+      self.conv_net = ResNet10()
+    elif network == "ResNet-18":
       self.conv_net = ResNet18()
+    else:
+      raise Exception("Inputted convolutional network not implemented by networks.py into SimpleShot.")
 
     # calculate feature dimension
     dummy_input = torch.zeros(1, 3, input_dim, input_dim)
