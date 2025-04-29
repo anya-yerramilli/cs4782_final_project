@@ -19,7 +19,7 @@ from argparse import ArgumentParser
 def train(
     model,
     train_loader,
-    val_dataset,  # NOTE: pass the *dataset*, not the loader
+    val_loader,
     epochs: int = 90,
     lr: float = 0.1,
     device: str = "cuda",
@@ -51,7 +51,7 @@ def train(
         running_total = 0
 
         for inputs, targets in tqdm(
-            train_loader, desc=f"Epoch {epoch:3d}/{epochs} – train", leave=False
+            train_loader, desc=f"Epoch {epoch:3d}/{epochs} – train"
         ):
             inputs, targets = inputs.to(device), targets.to(device)
 
@@ -76,7 +76,7 @@ def train(
         # ─────────────────────── validation episodes ─────────────────
         val_acc, ci95 = evaluate_few_shot(
             model,
-            val_dataset,  # ← dataset, not loader
+            val_loader,
             n_way=5,
             k_shot=1,
             n_tasks=600,
@@ -124,9 +124,11 @@ def evaluate_few_shot(
     with torch.no_grad():
         for inputs, labels in tqdm(data_loader, desc="Extracting features"):
             inputs = inputs.to(device)
-            features = model.feature_extraction(inputs.unsqueeze(0))
+            features = model.feature_extraction(inputs)
             all_features.append(features.cpu())
-            all_labels.append(labels.view(-1) if torch.is_tensor(labels) else torch.tensor([labels]))
+            all_labels.append(
+                labels.view(-1) if torch.is_tensor(labels) else torch.tensor([labels])
+            )
 
     all_features = torch.cat(all_features, dim=0)
     all_labels = torch.cat(all_labels, dim=0)
@@ -193,8 +195,10 @@ def evaluate_few_shot(
                 torch.norm(query_features, dim=1, keepdim=True) + 1e-8
             )
 
-        predicted = model.nearest_neighbor_classification(query_features, support_features, support_labels)
-        
+        predicted = model.nearest_neighbor_classification(
+            query_features, support_features, support_labels
+        )
+
         accuracy = 100.0 * (predicted == query_labels).float().mean().item()
         accuracies.append(accuracy)
 
@@ -208,9 +212,15 @@ def evaluate_few_shot(
 
 
 def main():
+    # Parse arguments
+    parser = ArgumentParser()
+    parser.add_argument("--network", type=str, default="Conv-4")
+    args = parser.parse_args()
+
     # Get datasets
+    print("Retrieving datasets...")
     train_dataset, val_dataset, test_dataset = get_datasets()
-    print("got data sets")
+    print("Got datasets.")
 
     # Create data loaders
     train_loader = DataLoader(
@@ -218,23 +228,19 @@ def main():
     )
     val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=0)
-    print("created data loader")
+    print("Created data loader.")
 
     # Define device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize model
-    parser = ArgumentParser()
-    parser.add_argument("--network", type=str, default="Conv-4")
-    args = parser.parse_args()  
-
     model = SimpleShot(input_dim=84, num_classes=64, network=args.network)
     model = model.to(device)
-    print("init model")
+    print("Initialized model.")
 
     # Train model
-    model = train(model, train_loader, val_dataset, epochs=90, lr=0.1, device=device)
-    print("done training!")
+    model = train(model, train_loader, val_loader, epochs=90, lr=0.1, device=device)
+    print("Training complete!")
 
     # Evaluate on test set using 5-way 1-shot and 5-way 5-shot tasks
     print("Evaluating on test set...")
