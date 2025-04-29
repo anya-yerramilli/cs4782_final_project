@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 ######################################
@@ -16,7 +17,7 @@ class ConvBlock(nn.Module):
     self.model = nn.Sequential(
       nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1),
       nn.BatchNorm2d(out_channels),
-      nn.ReLU(),
+      nn.ReLU(inplace=True),
       nn.MaxPool2d(kernel_size=2)
     )
 
@@ -139,3 +140,87 @@ class ResNet18(nn.Module):
     x = self.layer4(x)
     x = self.avgpool(x)
     return x
+
+
+###################################
+############### WRN ###############
+###################################
+
+
+# Define WRN
+class WRN(nn.Module):
+  def __init__(self, depth : int = 28, widen_factor : int = 10):
+    super(WRN, self).__init__()
+
+    assert (depth - 4) % 6 == 0, 'depth not of the form 6n+4'
+    n = (depth - 4) // 6  # number of blocks per layer
+
+    self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+    self.bn1 = nn.BatchNorm2d(16)
+    self.layer1 = self._make_layer(16, 16 * widen_factor, n, stride=1)
+    self.layer2 = self._make_layer(16 * widen_factor, 32 * widen_factor, n, stride=2)
+    self.layer3 = self._make_layer(32 * widen_factor, 64 * widen_factor, n, stride=2)
+    
+    self.bn2 = nn.BatchNorm2d(64 * widen_factor)
+
+  def _make_layer(self, in_channels, out_channels, num_blocks, stride):
+    layers = []
+    layers.append(ResidualBlock(in_channels, out_channels, stride))
+    for _ in range(1, num_blocks):
+        layers.append(ResidualBlock(out_channels, out_channels, stride=1))
+    return nn.Sequential(*layers)
+
+  def forward(self, x):
+    out = F.relu(self.bn1(self.conv1(x)))
+    out = self.layer1(out)
+    out = self.layer2(out)
+    out = self.layer3(out)
+    out = F.relu(self.bn2(out))
+    out = F.avg_pool2d(out, 8)
+    return out
+
+
+#########################################
+############### MobileNet ###############
+#########################################
+
+
+class MobileBlock(nn.Module):
+  def __init__(self, in_channels, out_channels, stride):
+    super(MobileBlock, self).__init__()
+    self.model = nn.Sequential(
+      nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=stride,
+                padding=1, groups=in_channels, bias=False),
+      nn.BatchNorm2d(in_channels),
+      nn.ReLU(inplace=True),
+      nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, bias=False),
+      nn.BatchNorm2d(out_channels),
+      nn.ReLU(inplace=True)
+    )
+
+  def forward(self, x):
+    return self.model(x)
+
+class MobileNet(nn.Module):
+  def __init__(self):
+    super(MobileNet, self).__init__()
+    self.model = nn.Sequential(
+      nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1, bias=False),
+      nn.BatchNorm2d(32),
+      nn.ReLU(inplace=True),
+
+      MobileBlock(32, 64, stride=1),
+      MobileBlock(64, 128, stride=2),
+      MobileBlock(128, 128, stride=1),
+      MobileBlock(128, 256, stride=2),
+      MobileBlock(256, 256, stride=1),
+      MobileBlock(256, 512, stride=2),
+      *[MobileBlock(512, 512, stride=1) for _ in range(5)],
+      MobileBlock(512, 1024, stride=2),
+      MobileBlock(1024, 1024, stride=1),
+
+      nn.AdaptiveAvgPool2d(1)
+    )
+
+  def forward(self, x):
+    return self.model(x)

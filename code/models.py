@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from networks import Conv4, ResNet10, ResNet18
+import torchvision
+import networks
 
 class SimpleShot(nn.Module):
   def __init__(
@@ -21,11 +22,17 @@ class SimpleShot(nn.Module):
 
     # convolutional network
     if network == "Conv-4":
-      self.conv_net = Conv4()
+      self.conv_net = networks.Conv4()
     elif network == "ResNet-10":
-      self.conv_net = ResNet10()
+      self.conv_net = networks.ResNet10()
     elif network == "ResNet-18":
-      self.conv_net = ResNet18()
+      self.conv_net = networks.ResNet18()
+    elif network == "WRN":
+      self.conv_net = networks.WRN()
+    elif network == "MobileNet":
+      self.conv_net = networks.MobileNet()
+    elif network == "DenseNet":
+      self.conv_net = torchvision.models.densenet121()
     else:
       raise Exception("Inputted convolutional network not implemented by networks.py into SimpleShot.")
 
