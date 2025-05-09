@@ -24,9 +24,3 @@ def get_datasets(root="../data"):
     )
 
     return train, val, test
-
-
-# NOTE: example on what the dataset looks like:
-# img, label = train_dataset[0]
-# print(img.shape)   # torch.Size([3, 84, 84])
-# print(label)       # int (e.g., 0 to 63 in train, 0 to 15 in val, etc.)
