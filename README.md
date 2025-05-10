@@ -8,7 +8,7 @@ Our project was re-implementing SimpleShot (Wang et al.), a model that challenge
 
 We aimed to reproduce the results of using the architecture described in SimpleShot (Wang et al.) for different feature transformations (UN, L2N, CL2N) across various CNN backbones (Conv-4, ResNet-10, ResNet-18) on 5-way 1-shot and 5-way 5-shot classification tasks using the miniImageNet dataset. Specifically, we focused on validating whether simple feature transformations could make nearest-neighbor classifiers competitive with meta-learning approaches, as the original paper claimed.
 
-![Figure of performance of SimpleShot (Wang et al.) on different networks and number of shots.](chosen_result.png)
+![Figure of performance of SimpleShot (Wang et al.) on different networks and number of shots.](results/chosen_result.png)
 
 ## GitHub Contents
 
@@ -24,8 +24,6 @@ For testing, we also perform feature transformation (UN, L2N, CL2N) on images be
 
 We trained for 90 epochs and used SGD and cross-entropy loss. We starts with a learning rate of 0.1, then is reduced by a factor of 10 at epochs 45 and 66. We did 1-shot and 5-shot 5-way tasks and evaluated based on percentage accuracy of predicted labels.
 
-[challenges or modifications??]
-
 ## Reproduction Steps
 
 To reproduce our implementation, one would need to first follow the steps in the `data/README.md` to download the data from Google Drive. After correctly downloading the data and putting it in the `data` folder, you have to create a Python environment with the version `3.10.X`. Required libraries to pip install include: `torch`, `numpy`, `tqdm`, `learn2learn`, and `torchvision`.
@@ -36,7 +34,7 @@ To run the code, run the cells of the `test_notebook.ipynb` with GPU (eg: Google
 
 Our results reinforce the findings of the original SimpleShot (Wang et al.) paper: feature normalization, particularly CL2N, significantly improves few-shot classification performance. Despite slightly lower testing accuracies for all settings compared to the original paper, our results still confirm the impact of feature transformation techniques and the number of shots on model performance. While ResNet-10 and ResNet-18 achieve higher accuracy overall, Conv-4 remains more competitive relative to the original paper’s results, given its simplicity. The impact of normalization is most pronounced in 1-shot settings, where structured embeddings are critical.
 
-![Table with results of test sets.](results.png)
+![Table with results of test sets.](results/results.png)
 
 ## Conclusion
 
